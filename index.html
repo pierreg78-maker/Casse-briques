@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>CasseBlastes</title>
+<style>
+  body { margin:0; background:#1a1a2e; display:flex; justify-content:center; align-items:center; height:100vh; font-family:Arial; overflow:hidden; }
+  canvas { border:3px solid #6b46c1; border-radius:12px; background:#16213e; touch-action:none; }
+  #ui { position:absolute; top:20px; color:white; font-size:20px; text-align:center; width:100%; pointer-events:none; }
+  #msg { position:absolute; top:50px; color:white; font-size:24px; font-weight:bold; width:100%; text-align:center; text-shadow:0 0 10px #fff; }
+</style>
+</head>
+<body>
+<div id="ui">Score: <span id="score">0</span> | Vies: <span id="lives">3</span></div>
+<div id="msg"></div>
+<canvas id="game" width="480" height="720"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+const msgEl = document.getElementById('msg');
+
+// Couleurs tirées de ton image
+const COLORS = { cyto:'#8b9dc3', cytoPink:'#d8a8a8', nucleus:'#6b46c1', nucleusPink:'#c084fc', blue:'#2563eb', red:'#dc2626' };
+
+let paddle = { x: canvas.width/2-60, y: canvas.height-30, w: 120, h: 20 };
+let balls = [{x: paddle.x+paddle.w/2, y: paddle.y-10, vx: 4, vy: -4, r: 6}];
+let bricks = [];
+let score = 0, lives = 3, lastMilestone = 0, msgTimer = 0, gameOver = false;
+
+// Audio
+let audioCtx;
+function initAudio(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
+function playPing(){
+  if(!audioCtx) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination);
+  o.frequency.value = 880; g.gain.value = 0.15;
+  o.start(); g.gain.exponentialRampToValueAtZero(0.001, audioCtx.currentTime+0.15);
+  o.stop(audioCtx.currentTime+0.15);
+}
+
+// Créer briques cellules
+for(let r=0;r<6;r++){
+  for(let c=0;c<8;c++){
+    let isPink = Math.random()<0.2;
+    bricks.push({x:c*55+20, y:r*30+60, w:50, h:25, isPink, dying:false, timer:0, dead:false});
+  }
+}
+
+// Contrôles
+canvas.addEventListener('mousemove', e=>{
+  let rect = canvas.getBoundingClientRect();
+  paddle.x = Math.max(0, Math.min(e.clientX - rect.left - paddle.w/2, canvas.width - paddle.w));
+});
+canvas.addEventListener('touchmove', e=>{
+  let rect = canvas.getBoundingClientRect();
+  paddle.x = Math.max(0, Math.min(e.touches[0].clientX - rect.left - paddle.w/2, canvas.width - paddle.w));
+  e.preventDefault();
+});
+canvas.addEventListener('click', initAudio);
+
+function addScore(pts){
+  score += pts;
+  scoreEl.textContent = score;
+  if(score >= lastMilestone + 100){
+    lastMilestone = Math.floor(score/100)*100;
+    msgEl.textContent = "Bravo Maminouche!";
+    msgTimer = 120;
+  }
+}
+
+function addBall(){
+  let last = balls[balls.length-1];
+  balls.push({x:paddle.x+paddle.w/2, y:paddle.y-10, vx:-last.vx*0.8, vy:last.vy, r:6});
+}
+
+function drawPaddle(){
+  ctx.fillStyle = COLORS.blue;
+  ctx.beginPath(); ctx.roundRect(paddle.x, paddle.y, paddle.w/2, paddle.h, 10); ctx.fill();
+  ctx.fillStyle = COLORS.red;
+  ctx.beginPath(); ctx.roundRect(paddle.x+paddle.w/2, paddle.y, paddle.w/2, paddle.h, 10); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.3)";
+  ctx.fillRect(paddle.x+5, paddle.y+3, paddle.w-10, 4);
+}
+
+function drawBrick(b){
+  if(b.dying){
+    let p = 1 - b.timer/15, alpha = 1-p, scale = 1+p*0.4;
+    ctx.save(); ctx.translate(b.x+b.w/2, b.y+b.h/2); ctx.scale(scale,scale); ctx.globalAlpha=alpha;
+    let glow = ctx.createRadialGradient(0,0,0,0,0,b.w/2);
+    glow.addColorStop(0,"rgba(255,255,255,0.9)"); glow.addColorStop(1,"rgba(255,255,255,0)");
+    ctx.fillStyle = glow; ctx.fillRect(-b.w/2,-b.h/2,b.w,b.h);
+    ctx.restore(); ctx.globalAlpha=1;
+    b.timer--; if(b.timer<=0) b.dead=true;
+    return;
+  }
+  let cyto = b.isPink? COLORS.cytoPink : COLORS.cyto;
+  let nucleus = b.isPink? COLORS.nucleusPink : COLORS.nucleus;
+  ctx.fillStyle = cyto; ctx.beginPath(); ctx.roundRect(b.x,b.y,b.w,b.h,8); ctx.fill();
+  ctx.fillStyle = nucleus; ctx.beginPath(); ctx.ellipse(b.x+b.w/2,b.y+b.h/2,b.w*0.35,b.h*0.4,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.15)"; ctx.beginPath(); ctx.ellipse(b.x+b.w*0.4,b.y+b.h*0.35,b.w*0.1,b.h*0.12,0,0,Math.PI*2); ctx.fill();
+}
+
+function update(){
+  if(gameOver) return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Boucle balles à l'envers pour éviter les bugs splice
+  for(let i = balls.length-1; i >= 0; i--){
+    let ball = balls[i];
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    if(ball.x<ball.r || ball.x>canvas.width-ball.r) ball.vx*=-1;
+    if(ball.y<ball.r) ball.vy*=-1;
+
+    if(ball.y>canvas.height+ball.r){
+      balls.splice(i,1);
+      continue;
+    }
+
+    // Collision paddle avec vérification hauteur
+    if(ball.y+ball.r>paddle.y && ball.y-ball.r<paddle.y+paddle.h && ball.x>paddle.x && ball.x<paddle.x+paddle.w){
+      ball.vy = -Math.abs(ball.vy);
+      ball.vx = (ball.x - (paddle.x+paddle.w/2))/10;
+    }
+
+    // Collision briques
+    bricks.forEach(b=>{
+      if(!b.dead &&!b.dying && ball.x>b.x && ball.x<b.x+b.w && ball.y>b.y && ball.y<b.y+b.h){
+        b.dying=true; b.timer=15; ball.vy*=-1;
+        addScore(20);
+        playPing();
+        if(Math.random()<0.15) addBall();
+      }
+    });
+
+    ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fillStyle="white"; ctx.fill();
+  }
+
+  bricks.forEach(drawBrick);
+  bricks = bricks.filter(b=>!b.dead);
+  drawPaddle();
+
+  if(msgTimer>0){ msgTimer--; if(msgTimer===0) msgEl.textContent=""; }
+
+  if(balls.length===0){
+    lives--;
+    livesEl.textContent=lives;
+    if(lives>0){
+      balls=[{x:paddle.x+paddle.w/2,y:paddle.y-10,vx:4,vy:-4,r:6}];
+    } else {
+      alert("Game Over - Score: "+score);
+      gameOver = true;
+      return;
+    }
+  }
+
+  if(bricks.length===0){
+    alert("Victoire! Score: "+score);
+    gameOver = true;
+    return;
+  }
+
+  requestAnimationFrame(update);
+}
+update();
+</script>
+</body>
+</html>
