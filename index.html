@@ -3,17 +3,62 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>CasseBlastes</title>
+<title>Casse-Briques Maminouche</title>
 <style>
-  body { margin:0; background:#1a1a2e; display:flex; justify-content:center; align-items:center; height:100vh; font-family:Arial; overflow:hidden; }
-  canvas { border:3px solid #6b46c1; border-radius:12px; background:#16213e; touch-action:none; }
-  #ui { position:absolute; top:20px; color:white; font-size:20px; text-align:center; width:100%; pointer-events:none; }
-  #msg { position:absolute; top:50px; color:white; font-size:24px; font-weight:bold; width:100%; text-align:center; text-shadow:0 0 10px #fff; }
+  body { 
+    margin: 0; 
+    background: #1a1a2e; 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    height: 100vh; 
+    font-family: Arial; 
+    overflow: hidden; 
+  }
+  canvas { 
+    border: 3px solid #6b46c1; 
+    border-radius: 12px; 
+    touch-action: none; 
+  }
+  #ui { 
+    position: absolute; 
+    top: 20px; 
+    color: white; 
+    font-size: 20px; 
+    text-align: center; 
+    width: 100%; 
+    pointer-events: none; 
+  }
+  #msg { 
+    position: absolute; 
+    top: 50px; 
+    color: white; 
+    font-size: 24px; 
+    font-weight: bold; 
+    width: 100%; 
+    text-align: center; 
+    text-shadow: 0 0 10px #fff; 
+    pointer-events: none; 
+  }
+  #finalMsg { 
+    position: absolute; 
+    top: 40%; 
+    left: 50%; 
+    transform: translate(-50%, -50%); 
+    color: #ff69b4; 
+    font-size: 36px; 
+    font-weight: bold; 
+    text-align: center; 
+    text-shadow: 0 0 20px #ff69b4, 0 0 30px #ff69b4; 
+    pointer-events: none; 
+    display: none; 
+  }
 </style>
 </head>
 <body>
 <div id="ui">Score: <span id="score">0</span> | Vies: <span id="lives">3</span></div>
 <div id="msg"></div>
+<div id="finalMsg">Encore bravo Maminouche!<br><span id="fireworks"></span></div>
 <canvas id="game" width="480" height="720"></canvas>
 
 <script>
@@ -22,153 +67,336 @@ const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const livesEl = document.getElementById('lives');
 const msgEl = document.getElementById('msg');
+const finalMsgEl = document.getElementById('finalMsg');
+const fireworksEl = document.getElementById('fireworks');
 
-// Couleurs tirées de ton image
-const COLORS = { cyto:'#8b9dc3', cytoPink:'#d8a8a8', nucleus:'#6b46c1', nucleusPink:'#c084fc', blue:'#2563eb', red:'#dc2626' };
+// Charger l'image de fond
+const backgroundImage = new Image();
+backgroundImage.crossOrigin = 'anonymous';
+backgroundImage.src = 'https://raw.githubusercontent.com/pierreg78-maker/Casse-briques/main/images/1.jpg';
+
+// Couleurs
+const COLORS = { 
+  cyto: '#8b9dc3', 
+  cytoPink: '#d8a8a8', 
+  nucleus: '#6b46c1', 
+  nucleusPink: '#c084fc', 
+  blue: '#2563eb', 
+  red: '#dc2626'
+};
 
 let paddle = { x: canvas.width/2-60, y: canvas.height-30, w: 120, h: 20 };
 let balls = [{x: paddle.x+paddle.w/2, y: paddle.y-10, vx: 4, vy: -4, r: 6}];
 let bricks = [];
+let violetBricks = []; // Briques violettes (cellules à casser)
 let score = 0, lives = 3, lastMilestone = 0, msgTimer = 0, gameOver = false;
+let allVioletBricksDestroyed = false;
 
 // Audio
 let audioCtx;
-function initAudio(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
-function playPing(){
+function initAudio() {
+  if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function playPing() {
   if(!audioCtx) return;
   const o = audioCtx.createOscillator(), g = audioCtx.createGain();
   o.connect(g); g.connect(audioCtx.destination);
   o.frequency.value = 880; g.gain.value = 0.15;
-  o.start(); g.gain.exponentialRampToValueAtZero(0.001, audioCtx.currentTime+0.15);
-  o.stop(audioCtx.currentTime+0.15);
+  o.start(); g.gain.exponentialRampToValueAtZero(0.001, audioCtx.currentTime + 0.15);
+  o.stop(audioCtx.currentTime + 0.15);
 }
 
-// Créer briques cellules
-for(let r=0;r<6;r++){
-  for(let c=0;c<8;c++){
-    let isPink = Math.random()<0.2;
-    bricks.push({x:c*55+20, y:r*30+60, w:50, h:25, isPink, dying:false, timer:0, dead:false});
+function playBoom() {
+  if(!audioCtx) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination);
+  o.frequency.value = 200; g.gain.value = 0.2;
+  o.start(); g.gain.exponentialRampToValueAtZero(0.001, audioCtx.currentTime + 0.3);
+  o.stop(audioCtx.currentTime + 0.3);
+}
+
+// Créer les briques normales (cellules colorées)
+for(let r = 0; r < 6; r++) {
+  for(let c = 0; c < 8; c++) {
+    let isPink = Math.random() < 0.2;
+    bricks.push({x: c*55+20, y: r*30+60, w: 50, h: 25, isPink, dying: false, timer: 0, dead: false, isViolet: false});
+  }
+}
+
+// Créer les briques violettes invisibles (basées sur une grille)
+// Ajustez ces valeurs selon la position des cellules violettes dans votre image
+// Exemple : 4 colonnes x 3 lignes de cellules violettes
+const violetRows = 4;
+const violetCols = 6;
+const violetBrickWidth = 60;
+const violetBrickHeight = 40;
+const violetStartX = 30;
+const violetStartY = 100;
+
+for(let r = 0; r < violetRows; r++) {
+  for(let c = 0; c < violetCols; c++) {
+    violetBricks.push({
+      x: violetStartX + c * violetBrickWidth,
+      y: violetStartY + r * violetBrickHeight,
+      w: violetBrickWidth,
+      h: violetBrickHeight,
+      isPink: false,
+      dying: false,
+      timer: 0,
+      dead: false,
+      isViolet: true
+    });
   }
 }
 
 // Contrôles
-canvas.addEventListener('mousemove', e=>{
+canvas.addEventListener('mousemove', e => {
   let rect = canvas.getBoundingClientRect();
   paddle.x = Math.max(0, Math.min(e.clientX - rect.left - paddle.w/2, canvas.width - paddle.w));
 });
-canvas.addEventListener('touchmove', e=>{
+
+canvas.addEventListener('touchmove', e => {
   let rect = canvas.getBoundingClientRect();
   paddle.x = Math.max(0, Math.min(e.touches[0].clientX - rect.left - paddle.w/2, canvas.width - paddle.w));
   e.preventDefault();
 });
+
 canvas.addEventListener('click', initAudio);
 
-function addScore(pts){
+function addScore(pts) {
   score += pts;
   scoreEl.textContent = score;
-  if(score >= lastMilestone + 100){
+  if(score >= lastMilestone + 100) {
     lastMilestone = Math.floor(score/100)*100;
     msgEl.textContent = "Bravo Maminouche!";
     msgTimer = 120;
   }
 }
 
-function addBall(){
+function addBall() {
   let last = balls[balls.length-1];
-  balls.push({x:paddle.x+paddle.w/2, y:paddle.y-10, vx:-last.vx*0.8, vy:last.vy, r:6});
+  balls.push({x: paddle.x+paddle.w/2, y: paddle.y-10, vx: -last.vx*0.8, vy: last.vy, r: 6});
 }
 
-function drawPaddle(){
+function drawPaddle() {
   ctx.fillStyle = COLORS.blue;
-  ctx.beginPath(); ctx.roundRect(paddle.x, paddle.y, paddle.w/2, paddle.h, 10); ctx.fill();
+  ctx.beginPath(); 
+  ctx.roundRect(paddle.x, paddle.y, paddle.w/2, paddle.h, 10); 
+  ctx.fill();
   ctx.fillStyle = COLORS.red;
-  ctx.beginPath(); ctx.roundRect(paddle.x+paddle.w/2, paddle.y, paddle.w/2, paddle.h, 10); ctx.fill();
+  ctx.beginPath(); 
+  ctx.roundRect(paddle.x+paddle.w/2, paddle.y, paddle.w/2, paddle.h, 10); 
+  ctx.fill();
   ctx.fillStyle = "rgba(255,255,255,0.3)";
   ctx.fillRect(paddle.x+5, paddle.y+3, paddle.w-10, 4);
 }
 
-function drawBrick(b){
-  if(b.dying){
+function drawBrick(b) {
+  if(b.dying) {
     let p = 1 - b.timer/15, alpha = 1-p, scale = 1+p*0.4;
-    ctx.save(); ctx.translate(b.x+b.w/2, b.y+b.h/2); ctx.scale(scale,scale); ctx.globalAlpha=alpha;
-    let glow = ctx.createRadialGradient(0,0,0,0,0,b.w/2);
-    glow.addColorStop(0,"rgba(255,255,255,0.9)"); glow.addColorStop(1,"rgba(255,255,255,0)");
-    ctx.fillStyle = glow; ctx.fillRect(-b.w/2,-b.h/2,b.w,b.h);
-    ctx.restore(); ctx.globalAlpha=1;
-    b.timer--; if(b.timer<=0) b.dead=true;
+    ctx.save(); 
+    ctx.translate(b.x+b.w/2, b.y+b.h/2); 
+    ctx.scale(scale, scale); 
+    ctx.globalAlpha = alpha;
+    let glow = ctx.createRadialGradient(0, 0, 0, 0, 0, b.w/2);
+    glow.addColorStop(0, "rgba(255,255,255,0.9)"); 
+    glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow; 
+    ctx.fillRect(-b.w/2, -b.h/2, b.w, b.h);
+    ctx.restore(); 
+    ctx.globalAlpha = 1;
+    b.timer--; 
+    if(b.timer <= 0) b.dead = true;
     return;
   }
-  let cyto = b.isPink? COLORS.cytoPink : COLORS.cyto;
-  let nucleus = b.isPink? COLORS.nucleusPink : COLORS.nucleus;
-  ctx.fillStyle = cyto; ctx.beginPath(); ctx.roundRect(b.x,b.y,b.w,b.h,8); ctx.fill();
-  ctx.fillStyle = nucleus; ctx.beginPath(); ctx.ellipse(b.x+b.w/2,b.y+b.h/2,b.w*0.35,b.h*0.4,0,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.15)"; ctx.beginPath(); ctx.ellipse(b.x+b.w*0.4,b.y+b.h*0.35,b.w*0.1,b.h*0.12,0,0,Math.PI*2); ctx.fill();
+  
+  // Ne pas dessiner les briques violettes (elles sont invisibles)
+  if(b.isViolet) return;
+  
+  let cyto = b.isPink ? COLORS.cytoPink : COLORS.cyto;
+  let nucleus = b.isPink ? COLORS.nucleusPink : COLORS.nucleus;
+  ctx.fillStyle = cyto; 
+  ctx.beginPath(); 
+  ctx.roundRect(b.x, b.y, b.w, b.h, 8); 
+  ctx.fill();
+  ctx.fillStyle = nucleus; 
+  ctx.beginPath(); 
+  ctx.ellipse(b.x+b.w/2, b.y+b.h/2, b.w*0.35, b.h*0.4, 0, 0, Math.PI*2); 
+  ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,0.15)"; 
+  ctx.beginPath(); 
+  ctx.ellipse(b.x+b.w*0.4, b.y+b.h*0.35, b.w*0.1, b.h*0.12, 0, 0, Math.PI*2); 
+  ctx.fill();
 }
 
-function update(){
+// Effet de feu d'artifice
+let fireworks = [];
+
+function createFireworks() {
+  for(let i = 0; i < 50; i++) {
+    fireworks.push({
+      x: canvas.width/2,
+      y: canvas.height/2,
+      vx: (Math.random() - 0.5) * 8,
+      vy: (Math.random() - 0.5) * 8 - 3,
+      r: Math.random() * 4 + 2,
+      color: ['#ff69b4', '#ff1493', '#da70d6', '#ee82ee', '#ff00ff'][Math.floor(Math.random() * 5)],
+      life: 60 + Math.random() * 40,
+      maxLife: 60 + Math.random() * 40
+    });
+  }
+}
+
+function updateFireworks() {
+  for(let i = fireworks.length - 1; i >= 0; i--) {
+    let fw = fireworks[i];
+    fw.x += fw.vx;
+    fw.y += fw.vy;
+    fw.vy += 0.05; // Gravité
+    fw.life--;
+    
+    // Dessiner
+    ctx.beginPath();
+    ctx.arc(fw.x, fw.y, fw.r, 0, Math.PI*2);
+    ctx.fillStyle = fw.color;
+    ctx.globalAlpha = fw.life / fw.maxLife;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    
+    if(fw.life <= 0) {
+      fireworks.splice(i, 1);
+    }
+  }
+}
+
+function update() {
   if(gameOver) return;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  
+  // Dessiner l'image de fond
+  ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+  
+  // Dessiner un léger overlay pour que les éléments du jeu soient visibles
+  ctx.fillStyle = 'rgba(22, 33, 62, 0.3)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Mettre à jour et dessiner les feux d'artifice
+  if(allVioletBricksDestroyed) {
+    updateFireworks();
+  }
 
   // Boucle balles à l'envers pour éviter les bugs splice
-  for(let i = balls.length-1; i >= 0; i--){
+  for(let i = balls.length-1; i >= 0; i--) {
     let ball = balls[i];
     ball.x += ball.vx;
     ball.y += ball.vy;
 
-    if(ball.x<ball.r || ball.x>canvas.width-ball.r) ball.vx*=-1;
-    if(ball.y<ball.r) ball.vy*=-1;
+    if(ball.x < ball.r || ball.x > canvas.width - ball.r) ball.vx *= -1;
+    if(ball.y < ball.r) ball.vy *= -1;
 
-    if(ball.y>canvas.height+ball.r){
-      balls.splice(i,1);
+    if(ball.y > canvas.height + ball.r) {
+      balls.splice(i, 1);
       continue;
     }
 
     // Collision paddle avec vérification hauteur
-    if(ball.y+ball.r>paddle.y && ball.y-ball.r<paddle.y+paddle.h && ball.x>paddle.x && ball.x<paddle.x+paddle.w){
+    if(ball.y + ball.r > paddle.y && ball.y - ball.r < paddle.y + paddle.h && ball.x > paddle.x && ball.x < paddle.x + paddle.w) {
       ball.vy = -Math.abs(ball.vy);
-      ball.vx = (ball.x - (paddle.x+paddle.w/2))/10;
+      ball.vx = (ball.x - (paddle.x + paddle.w/2)) / 10;
     }
 
-    // Collision briques
-    bricks.forEach(b=>{
-      if(!b.dead &&!b.dying && ball.x>b.x && ball.x<b.x+b.w && ball.y>b.y && ball.y<b.y+b.h){
-        b.dying=true; b.timer=15; ball.vy*=-1;
+    // Collision briques normales
+    bricks.forEach(b => {
+      if(!b.dead && !b.dying && ball.x > b.x && ball.x < b.x + b.w && ball.y > b.y && ball.y < b.y + b.h) {
+        b.dying = true; 
+        b.timer = 15; 
+        ball.vy *= -1;
         addScore(20);
         playPing();
-        if(Math.random()<0.15) addBall();
+        if(Math.random() < 0.15) addBall();
       }
     });
 
-    ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fillStyle="white"; ctx.fill();
+    // Collision briques violettes (invisibles)
+    violetBricks.forEach(b => {
+      if(!b.dead && !b.dying && ball.x > b.x && ball.x < b.x + b.w && ball.y > b.y && ball.y < b.y + b.h) {
+        b.dying = true; 
+        b.timer = 15; 
+        ball.vy *= -1;
+        addScore(30);
+        playPing();
+        
+        // Vérifier si c'est la dernière brique violette
+        const aliveVioletBricks = violetBricks.filter(b => !b.dead && !b.dying);
+        if(aliveVioletBricks.length === 0) {
+          allVioletBricksDestroyed = true;
+          finalMsgEl.style.display = 'block';
+          createFireworks();
+          playBoom();
+        }
+      }
+    });
+
+    ctx.beginPath(); 
+    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2); 
+    ctx.fillStyle = "white"; 
+    ctx.fill();
   }
 
   bricks.forEach(drawBrick);
-  bricks = bricks.filter(b=>!b.dead);
+  bricks = bricks.filter(b => !b.dead);
+  
+  // Dessiner les briques violettes en mode debug (optionnel)
+  // Pour voir où elles se trouvent, décommentez les lignes suivantes :
+  /*
+  violetBricks.forEach(b => {
+    if(!b.dead && !b.dying) {
+      ctx.strokeStyle = 'rgba(107, 70, 193, 0.5)';
+      ctx.strokeRect(b.x, b.y, b.w, b.h);
+    }
+  });
+  */
+  
   drawPaddle();
 
-  if(msgTimer>0){ msgTimer--; if(msgTimer===0) msgEl.textContent=""; }
+  if(msgTimer > 0) {
+    msgTimer--; 
+    if(msgTimer === 0) msgEl.textContent = ""; 
+  }
 
-  if(balls.length===0){
+  if(balls.length === 0) {
     lives--;
-    livesEl.textContent=lives;
-    if(lives>0){
-      balls=[{x:paddle.x+paddle.w/2,y:paddle.y-10,vx:4,vy:-4,r:6}];
+    livesEl.textContent = lives;
+    if(lives > 0) {
+      balls = [{x: paddle.x + paddle.w/2, y: paddle.y - 10, vx: 4, vy: -4, r: 6}];
     } else {
-      alert("Game Over - Score: "+score);
+      alert("Game Over - Score: " + score);
       gameOver = true;
       return;
     }
   }
 
-  if(bricks.length===0){
-    alert("Victoire! Score: "+score);
+  if(bricks.length === 0 && violetBricks.filter(b => !b.dead).length === 0) {
+    alert("Victoire totale! Score: " + score);
     gameOver = true;
     return;
   }
 
   requestAnimationFrame(update);
 }
-update();
+
+// Attendre que l'image de fond soit chargée avant de démarrer
+backgroundImage.onload = function() {
+  update();
+};
+
+// Si l'image ne charge pas, démarrer quand même après un délai
+setTimeout(() => {
+  if(!backgroundImage.complete) {
+    console.log("L'image de fond n'a pas pu être chargée. Utilisation d'un fond uni.");
+    update();
+  }
+}, 2000);
 </script>
 </body>
 </html>
